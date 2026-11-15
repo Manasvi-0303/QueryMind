@@ -1,12 +1,17 @@
 
 import sqlite3
+from pathlib import Path
 
-DB_PATH = "data/college.db"
 
+def get_database_schema(db_path):
 
-def get_database_schema():
+    db_path = Path(db_path).resolve()
 
-    connection = sqlite3.connect(DB_PATH)
+    connection = sqlite3.connect(
+        db_path.as_uri() + "?mode=ro",
+        uri=True
+    )
+
     cursor = connection.cursor()
 
     cursor.execute("""
@@ -23,18 +28,20 @@ def get_database_schema():
     for table in tables:
         table_name = table[0]
 
-        cursor.execute(f"PRAGMA table_info({table_name})")
+        cursor.execute(
+            f'PRAGMA table_info("{table_name}")'
+        )
+
         columns = cursor.fetchall()
 
         schema += f"\nTable: {table_name}\n"
         schema += "Columns:\n"
 
         for column in columns:
-            column_name = column[1]
-            column_type = column[2]
-
-            schema += f"- {column_name} ({column_type})\n"
+            schema += f"- {column[1]} ({column[2]})\n"
 
     connection.close()
 
     return schema
+
+

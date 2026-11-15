@@ -1,19 +1,22 @@
 
 import sqlite3
 import pandas as pd
+from pathlib import Path
 
-DB_PATH = "data/college.db"
 
+def execute_sql(sql, db_path):
 
-def execute_sql(sql):
+    db_path = Path(db_path).resolve()
+
+    if not db_path.exists():
+        raise FileNotFoundError("Database file not found.")
 
     connection = sqlite3.connect(
-        f"file:{DB_PATH}?mode=ro",
+        db_path.as_uri() + "?mode=ro",
         uri=True
     )
 
     try:
-        # Allow only read operations
         connection.execute("PRAGMA query_only = ON")
 
         allowed_actions = {
@@ -28,29 +31,30 @@ def execute_sql(sql):
         def authorize(action, arg1, arg2, database, trigger):
             if action in allowed_actions:
                 return sqlite3.SQLITE_OK
-
             return sqlite3.SQLITE_DENY
 
         connection.set_authorizer(authorize)
 
         cursor = connection.cursor()
 
-        # Execute the generated SQL
+        # Reject multiple SQL statements
+        if not sql.strip():
+            raise ValueError("SQL query cannot be empty.")
+
         cursor.execute(sql)
 
-        # Get column names
+        if cursor.description is None:
+            raise ValueError("Only queries returning data are allowed.")
+
         columns = [description[0] for description in cursor.description]
 
-        # Fetch a maximum of 500 rows
         rows = cursor.fetchmany(501)
 
         if len(rows) > 500:
             rows = rows[:500]
 
-        # Convert results into a DataFrame
-        result = pd.DataFrame(rows, columns=columns)
-
-        return result
+        return pd.DataFrame(rows, columns=columns)
 
     finally:
         connection.close()
+
