@@ -1,19 +1,19 @@
 
+from pathlib import Path
+
 from core.sql_executor import execute_sql
 
-query = """
-SELECT
-    s.name,
-    SUM(m.marks_obtained) AS total_marks
-FROM students s
-JOIN marks m
-    ON s.student_id = m.student_id
-GROUP BY s.student_id, s.name
-ORDER BY total_marks DESC
-LIMIT 5
-"""
+BASE_DIR = Path(__file__).resolve().parent
+DB_PATH = BASE_DIR / "data" / "college.db"
 
-result = execute_sql(query)
+sql = "DELETE FROM students;"
 
-print("\nQUERY RESULTS:")
+print("Executing SQL...")
+
+result = execute_sql(sql, DB_PATH)
+
+print("\nQuery Result:")
 print(result)
+
+print("\nNumber of rows:", len(result))
+

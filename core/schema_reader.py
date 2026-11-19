@@ -1,47 +1,53 @@
 
 import sqlite3
 from pathlib import Path
+from functools import lru_cache
 
 
+@lru_cache(maxsize=16)
 def get_database_schema(db_path):
-
     db_path = Path(db_path).resolve()
+
+    if not db_path.exists():
+        raise FileNotFoundError("Database file not found.")
 
     connection = sqlite3.connect(
         db_path.as_uri() + "?mode=ro",
         uri=True
     )
 
-    cursor = connection.cursor()
+    try:
+        cursor = connection.cursor()
 
-    cursor.execute("""
-        SELECT name
-        FROM sqlite_master
-        WHERE type = 'table'
-        AND name NOT LIKE 'sqlite_%'
-    """)
+        cursor.execute("""
+            SELECT name
+            FROM sqlite_master
+            WHERE type = 'table'
+            AND name NOT LIKE 'sqlite_%'
+        """)
 
-    tables = cursor.fetchall()
+        tables = cursor.fetchall()
+        schema = ""
 
-    schema = ""
+        for table in tables:
+            table_name = table[0]
 
-    for table in tables:
-        table_name = table[0]
+            cursor.execute(
+                f'PRAGMA table_info("{table_name}")'
+            )
 
-        cursor.execute(
-            f'PRAGMA table_info("{table_name}")'
-        )
+            columns = cursor.fetchall()
 
-        columns = cursor.fetchall()
+            schema += f"\nTable: {table_name}\n"
+            schema += "Columns:\n"
 
-        schema += f"\nTable: {table_name}\n"
-        schema += "Columns:\n"
+            for column in columns:
+                schema += f"- {column[1]} ({column[2]})\n"
 
-        for column in columns:
-            schema += f"- {column[1]} ({column[2]})\n"
+        return schema
 
-    connection.close()
+    finally:
+        connection.close()
 
-    return schema
 
 
