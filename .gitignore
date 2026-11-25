@@ -1,7 +1,17 @@
+# Virtual environment
 .venv/
+
+# Python cache
 __pycache__/
 *.pyc
+
+# Environment variables and API keys
 .env
-.DS_Store
-data/*.db
 .streamlit/secrets.toml
+
+# Mac system files
+.DS_Store
+
+# User-uploaded databases
+data/user_uploads/
+user_uploads/

@@ -5,9 +5,11 @@ import pandas as pd
 import plotly.express as px
 import hashlib
 
-
 from pathlib import Path
 from core.query_pipeline import ask_database
+from core.sql_explainer import explain_sql
+from core.insight_engine import generate_insights
+from core.what_if_analysis import run_what_if
 
 CHART_COLORS = [
     "#2563EB",
@@ -38,10 +40,11 @@ st.set_page_config(
 
 
 # --------------------------------------------------
-# PROFESSIONAL UI STYLING
+# PROFESSIONAL LIGHT THEME
 # --------------------------------------------------
 
 st.markdown("""
+
 <style>
 
 /* ===== MAIN BACKGROUND ===== */
@@ -58,24 +61,23 @@ st.markdown("""
     margin-top: 0 !important;
 }
 
-/* Keep Streamlit header visible without hiding content */
+/* HEADER */
+
 header[data-testid="stHeader"] {
     background-color: #0B1730 !important;
     height: 3.5rem !important;
     z-index: 999;
 }
 
-/* Match the toolbar to the application */
 div[data-testid="stToolbar"] {
     background-color: #0B1730 !important;
 }
 
-/* Prevent the main content from going behind the header */
 section[data-testid="stMain"] {
     background-color: #0B1730 !important;
 }
 
-/* ===== MAKE TEXT BRIGHT AND VISIBLE ===== */
+/* TEXT */
 
 h1, h2, h3, h4, h5, h6 {
     color: #FFFFFF !important;
@@ -89,7 +91,7 @@ p, label, li,
     color: #D8E9FF !important;
 }
 
-/* ===== SIDEBAR ===== */
+/* SIDEBAR */
 
 section[data-testid="stSidebar"] {
     background-color: #102344;
@@ -99,7 +101,7 @@ section[data-testid="stSidebar"] {
     max-width: 260px !important;
 }
 
-/* ===== BRAND ===== */
+/* BRAND */
 
 .brand-label {
     color: #75B5FF !important;
@@ -109,7 +111,7 @@ section[data-testid="stSidebar"] {
     text-transform: uppercase;
 }
 
-/* ===== METRIC CARDS ===== */
+/* METRIC CARDS */
 
 div[data-testid="stMetric"] {
     background-color: #17345B;
@@ -128,7 +130,7 @@ div[data-testid="stMetricValue"] * {
     color: #FFFFFF !important;
 }
 
-/* ===== TEXT INPUTS ===== */
+/* TEXT INPUTS */
 
 .stTextInput input,
 .stTextArea textarea {
@@ -150,7 +152,7 @@ div[data-testid="stMetricValue"] * {
     box-shadow: 0 0 0 1px #4595FF !important;
 }
 
-/* ===== SELECT BOXES ===== */
+/* SELECT BOXES */
 
 div[data-baseweb="select"] > div {
     background-color: #102849 !important;
@@ -162,7 +164,6 @@ div[data-baseweb="select"] * {
     color: #FFFFFF !important;
 }
 
-/* Dropdown options */
 ul[data-testid="stSelectboxVirtualDropdown"] {
     background-color: #17345B !important;
 }
@@ -172,7 +173,7 @@ ul[data-testid="stSelectboxVirtualDropdown"] {
     color: #FFFFFF !important;
 }
 
-/* ===== BUTTONS ===== */
+/* BUTTONS */
 
 div.stButton > button,
 div.stDownloadButton > button {
@@ -191,7 +192,7 @@ div.stDownloadButton > button:hover {
     color: #FFFFFF !important;
 }
 
-/* ===== FILE UPLOADER ===== */
+/* FILE UPLOADER */
 
 div[data-testid="stFileUploader"] {
     background-color: #17345B !important;
@@ -204,7 +205,7 @@ div[data-testid="stFileUploader"] * {
     color: #FFFFFF !important;
 }
 
-/* ===== DATA TABLES ===== */
+/* DATA TABLES */
 
 div[data-testid="stDataFrame"] {
     background-color: #102849 !important;
@@ -213,7 +214,7 @@ div[data-testid="stDataFrame"] {
     overflow: hidden;
 }
 
-/* ===== SQL CODE AND RESULTS ===== */
+/* SQL CODE AND RESULTS */
 
 div[data-testid="stCode"],
 pre,
@@ -221,7 +222,7 @@ code {
     color: #FFFFFF !important;
 }
 
-/* ===== ALERTS ===== */
+/* ALERTS */
 
 div[data-testid="stAlert"] {
     background-color: #17345B !important;
@@ -233,7 +234,7 @@ div[data-testid="stAlert"] * {
     color: #FFFFFF !important;
 }
 
-/* ===== EXPANDERS ===== */
+/* EXPANDERS */
 
 div[data-testid="stExpander"] {
     background-color: #17345B;
@@ -246,20 +247,20 @@ div[data-testid="stExpander"] summary * {
     color: #FFFFFF !important;
 }
 
-/* ===== CHECKBOXES AND RADIO BUTTONS ===== */
+/* CHECKBOXES AND RADIO BUTTONS */
 
 .stCheckbox label,
 .stRadio label {
     color: #FFFFFF !important;
 }
 
-/* ===== DIVIDERS ===== */
+/* DIVIDERS */
 
 hr {
     border-color: #28528A !important;
 }
 
-/* ===== RESPONSIVE ===== */
+/* RESPONSIVE */
 
 @media (max-width: 768px) {
     .block-container {
@@ -272,9 +273,8 @@ hr {
 }
 
 </style>
+
 """, unsafe_allow_html=True)
-
-
 
 
 # --------------------------------------------------
@@ -291,7 +291,13 @@ defaults = {
     "last_result": None,
     "last_status": None,
     "last_question": None,
-    "performance": None
+    "performance": None,
+    "conversation_history": [],
+    "conversation_db_path": str(SAMPLE_DB.resolve()),
+    "pending_clarification": None,
+    "sql_explanation": None,
+    "ai_insights": None,
+    "what_if_result": None
 }
 
 for key, value in defaults.items():
@@ -567,6 +573,8 @@ def create_chart(data, chart_type, x_column, y_column):
     )
 
     return fig
+
+
 # --------------------------------------------------
 # UPLOAD DATABASE
 # --------------------------------------------------
@@ -614,9 +622,29 @@ if uploaded_file is not None:
         st.session_state.db_name = "Sample college database"
 
 
-# Active database
+# --------------------------------------------------
+# ACTIVE DATABASE AND DATABASE-SWITCH RESET
+# --------------------------------------------------
 
 db_path = st.session_state.db_path
+
+if st.session_state.conversation_db_path != db_path:
+
+    st.session_state.conversation_history = []
+    st.session_state.query_history = []
+    st.session_state.clarification_question = None
+    st.session_state.original_question = None
+    st.session_state.pending_clarification = None
+    st.session_state.last_sql = None
+    st.session_state.last_result = None
+    st.session_state.last_status = None
+    st.session_state.last_question = None
+    st.session_state.performance = None
+    st.session_state.sql_explanation = None
+    st.session_state.ai_insights = None
+    st.session_state.what_if_result = None
+    st.session_state.conversation_db_path = db_path
+
 
 if not Path(db_path).exists():
     db_path = str(SAMPLE_DB.resolve())
@@ -646,15 +674,25 @@ st.sidebar.caption(
     f"{len(tables)} tables | {total_rows:,} records"
 )
 
+
 if st.sidebar.button("Use sample database", use_container_width=True):
 
     st.session_state.db_path = str(SAMPLE_DB.resolve())
     st.session_state.db_name = "Sample college database"
 
+    st.session_state.conversation_history = []
+    st.session_state.query_history = []
     st.session_state.clarification_question = None
+    st.session_state.original_question = None
+    st.session_state.pending_clarification = None
     st.session_state.last_result = None
     st.session_state.last_sql = None
-
+    st.session_state.last_status = None
+    st.session_state.last_question = None
+    st.session_state.performance = None
+    st.session_state.sql_explanation = None
+    st.session_state.ai_insights = None
+    st.session_state.what_if_result = None
     st.rerun()
 
 
@@ -674,6 +712,32 @@ if st.session_state.query_history:
 
 else:
     st.sidebar.caption("Your previous queries will appear here.")
+
+    st.sidebar.divider()
+
+
+if st.sidebar.button(
+    "Clear conversation",
+    use_container_width=True,
+    key="clear_conversation"
+):
+
+    st.session_state.conversation_history = []
+    st.session_state.query_history = []
+
+    st.session_state.clarification_question = None
+    st.session_state.original_question = None
+
+    st.session_state.last_sql = None
+    st.session_state.last_result = None
+    st.session_state.last_status = None
+    st.session_state.last_question = None
+    st.session_state.pending_clarification = None
+    st.session_state.performance = None
+    st.session_state.sql_explanation = None
+    st.session_state.ai_insights = None
+    st.session_state.what_if_result = None
+    st.rerun()
 
 
 # --------------------------------------------------
@@ -753,7 +817,9 @@ if generate_button:
         st.session_state.clarification_question = None
         st.session_state.last_result = None
         st.session_state.last_sql = None
-
+        st.session_state.sql_explanation = None
+        st.session_state.ai_insights = None
+        st.session_state.what_if_result = None
         st.session_state.original_question = question
         st.session_state.last_question = question
 
@@ -763,21 +829,45 @@ if generate_button:
 
                 response = ask_database(
                     question,
-                    db_path
+                    db_path,
+                    st.session_state.conversation_history
                 )
 
             st.session_state.last_status = response["status"]
 
             if response["status"] == "clarification":
 
-                st.session_state.clarification_question = (
-                    response["clarification_question"]
-                )
+                clarification_question = response["clarification_question"]
+
+                st.session_state.clarification_question = clarification_question
+
+                # Store the user's question
+                st.session_state.conversation_history.append({
+                    "role": "user",
+                    "content": question
+                })
+
+                # Store QueryMind's clarification
+                st.session_state.conversation_history.append({
+                    "role": "assistant",
+                    "content": clarification_question
+                })
 
             else:
 
                 st.session_state.last_sql = response["sql"]
                 st.session_state.last_result = response["result"]
+
+                # Store conversation
+                st.session_state.conversation_history.append({
+                    "role": "user",
+                    "content": question
+                })
+
+                st.session_state.conversation_history.append({
+                    "role": "assistant",
+                    "content": f"Generated SQL:\n{response['sql']}"
+                })
 
                 st.session_state.query_history.append(question)
 
@@ -823,8 +913,15 @@ if st.session_state.clarification_question:
 
                     response = ask_database(
                         combined_question,
-                        db_path
+                        db_path,
+                        st.session_state.conversation_history
                     )
+
+                # Store user's clarification
+                st.session_state.conversation_history.append({
+                    "role": "user",
+                    "content": clarification
+                })
 
                 if response["status"] == "clarification":
 
@@ -832,12 +929,25 @@ if st.session_state.clarification_question:
                         response["clarification_question"]
                     )
 
+                    st.session_state.conversation_history.append({
+                        "role": "assistant",
+                        "content": response["clarification_question"]
+                    })
+
                 else:
 
                     st.session_state.clarification_question = None
 
                     st.session_state.last_sql = response["sql"]
                     st.session_state.last_result = response["result"]
+                    st.session_state.last_question = combined_question
+                    st.session_state.sql_explanation = None
+                    st.session_state.ai_insights = None
+                    st.session_state.what_if_result = None
+                    st.session_state.conversation_history.append({
+                        "role": "assistant",
+                        "content": f"Generated SQL:\n{response['sql']}"
+                    })
 
                     st.session_state.query_history.append(
                         combined_question
@@ -851,7 +961,7 @@ if st.session_state.clarification_question:
 
 
 # --------------------------------------------------
-# SQL OUTPUT
+# SQL OUTPUT AND AI EXPLANATION
 # --------------------------------------------------
 
 if st.session_state.last_sql:
@@ -865,9 +975,88 @@ if st.session_state.last_sql:
         language="sql"
     )
 
+    # --------------------------------------------------
+    # AI SQL EXPLANATION
+    # --------------------------------------------------
+
+    st.subheader("SQL Explanation & Breakdown")
+
+    st.caption(
+        "Understand how QueryMind's generated SQL query works."
+    )
+
+    if st.button(
+        "Explain this SQL",
+        type="primary",
+        use_container_width=True,
+        key="explain_sql_button"
+    ):
+
+        try:
+
+            with st.spinner("Analyzing your SQL query..."):
+
+                st.session_state.sql_explanation = explain_sql(
+                    st.session_state.last_question or "",
+                    st.session_state.last_sql
+                )
+
+        except Exception as error:
+
+            st.session_state.sql_explanation = None
+
+            st.session_state.ai_insights = None
+
+            st.session_state.what_if_result = None
+            st.error(
+                f"Could not generate SQL explanation: {error}"
+            )
+
+    explanation = st.session_state.sql_explanation
+
+    if explanation:
+
+        st.markdown("### 1. Query Overview")
+        st.write(explanation["overview"])
+
+        st.divider()
+
+        st.markdown("### 2. Clause-by-Clause Breakdown")
+
+        for clause in explanation["clauses"]:
+
+            with st.expander(
+                clause["name"],
+                expanded=True
+            ):
+
+                st.write(clause["explanation"])
+
+        if explanation["functions"]:
+
+            st.divider()
+            st.markdown("### 3. SQL Functions")
+
+            for function in explanation["functions"]:
+
+                st.markdown(f"**{function['name']}**")
+                st.write(function["explanation"])
+
+        st.divider()
+        st.markdown("### 4. Query Execution Flow")
+
+        for index, step in enumerate(
+            explanation["execution_flow"],
+            start=1
+        ):
+
+            st.markdown(f"**Step {index}:** {step}")
+
+        st.divider()
+        st.markdown("### 5. How This Answers Your Question")
+        st.write(explanation["how_it_answers"])
 
 
-#
 # --------------------------------------------------
 # QUERY RESULTS, EXPLANATION AND VISUALIZATIONS
 # --------------------------------------------------
@@ -920,6 +1109,167 @@ if st.session_state.last_result is not None:
         explanation = explain_result(result)
 
         st.markdown(explanation)
+
+        # --------------------------------------------------
+        # AI INSIGHT ENGINE
+        # --------------------------------------------------
+
+        st.divider()
+        st.subheader("AI Insight Engine")
+
+        st.caption(
+            "Discover meaningful patterns, comparisons and unusual values "
+            "in your query results."
+        )
+
+        if st.button(
+            "Generate AI Insights",
+            type="primary",
+            use_container_width=True,
+            key="generate_ai_insights"
+        ):
+
+            try:
+
+                with st.spinner("Analysing your query results..."):
+
+                    st.session_state.ai_insights = generate_insights(
+                        st.session_state.last_question or "",
+                        st.session_state.last_sql or "",
+                        result
+                    )
+
+            except Exception as error:
+
+                st.session_state.ai_insights = None
+
+                st.session_state.what_if_result = None
+                st.error(f"Could not generate AI insights: {error}")
+
+        ai_insights = st.session_state.ai_insights
+
+        if ai_insights:
+
+            st.markdown("### Overall summary")
+            st.write(ai_insights["overall_summary"])
+
+            st.markdown("### Key findings")
+
+            for index, insight in enumerate(ai_insights["insights"], start=1):
+
+                with st.container(border=True):
+
+                    st.markdown(f"**{index}. {insight['title']}**")
+
+                    st.caption(insight["type"].replace("_", " ").title())
+
+                    st.write(insight["observation"])
+
+                    if insight.get("evidence"):
+                        st.caption(f"Evidence: {insight['evidence']}")
+
+                    if insight.get("recommendation"):
+                        st.markdown("**Suggested action**")
+                        st.write(insight["recommendation"])
+
+            if ai_insights.get("caveats"):
+                st.caption(f"Data limitations: {ai_insights['caveats']}")
+
+        # --------------------------------------------------
+        # WHAT-IF ANALYSIS
+        # --------------------------------------------------
+
+        st.divider()
+        st.subheader("What-If Analysis")
+
+        st.caption(
+            "Test hypothetical changes on a copy of your query results. "
+            "Your database and original query results will not be modified."
+        )
+
+        st.info(
+            "For student-level scenarios, first run a query that returns "
+            "one row per student and a numeric percentage column. "
+            "For example: Show each student's overall attendance percentage."
+        )
+
+        what_if_scenario = st.text_area(
+            "Describe your hypothetical scenario",
+            placeholder=(
+                "Example: What happens to average attendance if every student "
+                "below 60% improves by 10 percentage points?"
+            ),
+            key="what_if_scenario_input",
+            height=100
+        )
+
+        if st.button(
+            "Run What-If Simulation",
+            type="primary",
+            use_container_width=True,
+            key="run_what_if_simulation"
+        ):
+
+            try:
+
+                with st.spinner("Simulating your scenario..."):
+
+                    st.session_state.what_if_result = run_what_if(
+                        what_if_scenario,
+                        result
+                    )
+
+            except Exception as error:
+
+                st.session_state.what_if_result = None
+                st.error(f"Could not run the simulation: {error}")
+
+        what_if_result = st.session_state.what_if_result
+
+        if what_if_result:
+
+            st.markdown("### Simulation results")
+            st.write(what_if_result["interpretation"])
+
+            metric_one, metric_two, metric_three = st.columns(3)
+
+            metric_one.metric(
+                "Original average",
+                f"{what_if_result['original_average']:.2f}%"
+            )
+
+            metric_two.metric(
+                "Simulated average",
+                f"{what_if_result['simulated_average']:.2f}%",
+                delta=f"{what_if_result['average_change']:+.2f} percentage points"
+            )
+
+            metric_three.metric(
+                "Rows affected",
+                f"{what_if_result['affected_rows']:,} / "
+                f"{what_if_result['total_rows']:,}"
+            )
+
+            st.caption(
+                "Simulation only. No database records were changed. "
+                "The average is calculated over non-missing values in the selected result column."
+            )
+
+            with st.expander("View original vs simulated values"):
+
+                st.dataframe(
+                    what_if_result["comparison_data"],
+                    use_container_width=True,
+                    hide_index=True
+                )
+
+            with st.expander("View simulated dataset"):
+
+                st.dataframe(
+                    what_if_result["simulated_data"],
+                    use_container_width=True,
+                    hide_index=True
+                )
 
         # --------------------------------------------------
         # AUTOMATIC VISUALIZATION
@@ -1093,7 +1443,7 @@ if st.session_state.last_result is not None:
                     f"Could not generate chart: {error}"
                 )
 
-        
+
 # --------------------------------------------------
 # DATABASE EXPLORER
 # --------------------------------------------------
@@ -1149,10 +1499,3 @@ st.markdown(
     """,
     unsafe_allow_html=True
 )
-
-
-
-
-
-
-

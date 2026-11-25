@@ -1,4 +1,3 @@
-
 import os
 import httpx
 from dotenv import load_dotenv
@@ -26,14 +25,15 @@ client = genai.Client(
 )
 
 
-def ask_gemini(prompt):
+def ask_gemini(prompt, max_output_tokens=512):
+
     try:
         response = client.models.generate_content(
             model="gemini-3.5-flash-lite",
             contents=prompt,
             config=types.GenerateContentConfig(
                 response_mime_type="application/json",
-                max_output_tokens=512,
+                max_output_tokens=max_output_tokens,
                 thinking_config=types.ThinkingConfig(
                     thinking_level="minimal"
                 )

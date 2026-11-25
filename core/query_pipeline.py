@@ -6,7 +6,7 @@ from core.sql_generator import generate_sql
 from core.sql_executor import execute_sql
 
 
-def ask_database(question, db_path):
+def ask_database(question, db_path, conversation_history=None):
 
     total_start = time.perf_counter()
 
@@ -15,9 +15,15 @@ def ask_database(question, db_path):
     schema = get_database_schema(db_path)
     schema_time = time.perf_counter() - start
 
-    # Step 2: Generate SQL or clarification
+    # Step 2: Generate SQL using conversation context
     start = time.perf_counter()
-    response = generate_sql(question, schema)
+
+    response = generate_sql(
+        question,
+        schema,
+        conversation_history
+    )
+
     gemini_time = time.perf_counter() - start
 
     # Step 3: Stop if clarification is needed
@@ -39,8 +45,10 @@ def ask_database(question, db_path):
 
     # Step 4: Execute SQL
     start = time.perf_counter()
+
     sql_query = response["sql"]
     result = execute_sql(sql_query, db_path)
+
     sql_time = time.perf_counter() - start
 
     total_time = time.perf_counter() - total_start
@@ -58,6 +66,7 @@ def ask_database(question, db_path):
         "sql": sql_query,
         "result": result
     }
+
 
 
 
